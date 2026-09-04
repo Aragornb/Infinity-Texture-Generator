@@ -1,0 +1,6 @@
+{
+  "name": "Seamless PBR Texture Generator 4K",
+  "description": "Gerador com IA de texturas PBR seamless em alta resolução (até 4K) com mapas de difusão, especular, normal, rugosidade e deslocamento, com exportação para Blender, V-Ray, Unity e Unreal Engine.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
