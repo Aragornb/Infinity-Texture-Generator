@@ -1,3 +1,13 @@
+/*
+ * Infinity Texture Generator
+ * Copyright (C) 2026 BRENO ARAGÃO SOUZA
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ */
+
 export type TextureResolution = 1024 | 2048 | 4096;
 
 export type PBRMapType = 'diffuse' | 'specular' | 'normal' | 'roughness' | 'displacement' | 'ao';

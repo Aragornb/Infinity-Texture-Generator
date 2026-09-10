@@ -1,3 +1,13 @@
+/*
+ * Infinity Texture Generator
+ * Copyright (C) 2026 BRENO ARAGÃO SOUZA
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ */
+
 import React, { useEffect, useRef, useState } from 'react';
 import { MaterialProperties, PBRMapData, TextureResolution } from './types';
 import { generatePBRMaps, loadImage } from './utils/pbrGenerator';
@@ -8,7 +18,12 @@ import { MapControls } from './components/MapControls';
 import { SoftwareConfigView } from './components/SoftwareConfigView';
 import { PromptOrUpload } from './components/PromptOrUpload';
 import { MaterialPreview } from './components/MaterialPreview';
-import { Archive, CheckCircle2, Info, Loader2 } from 'lucide-react';
+import { InfinityLogo } from './components/InfinityLogo';
+import { LanguageSelector } from './components/LanguageSelector';
+import { ApiKeySettingsModal } from './components/ApiKeySettingsModal';
+import { getApiHeaders, getStoredApiKey } from './utils/apiKeyStorage';
+import { useLanguage } from './i18n/LanguageContext';
+import { Archive, CheckCircle2, Info, Loader2, Settings } from 'lucide-react';
 
 const GENERIC_DEFAULT_MATERIAL: MaterialProperties = {
   name: 'Material Padrão (Genérico)',
@@ -29,6 +44,8 @@ const GENERIC_DEFAULT_MATERIAL: MaterialProperties = {
 };
 
 export default function App() {
+  const { t } = useLanguage();
+
   // Current Material Properties and Baseline Initial State
   const [material, setMaterial] = useState<MaterialProperties>(GENERIC_DEFAULT_MATERIAL);
   const [initialMaterial, setInitialMaterial] = useState<MaterialProperties>(GENERIC_DEFAULT_MATERIAL);
@@ -48,6 +65,32 @@ export default function App() {
     percent: 0,
     message: '',
   });
+
+  // Open Core & AI Key state
+  const [hasEnvKey, setHasEnvKey] = useState<boolean>(false);
+  const [hasBrowserKey, setHasBrowserKey] = useState<boolean>(() => Boolean(getStoredApiKey()));
+  const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
+  const [educationalNotice, setEducationalNotice] = useState<string | null>(null);
+
+  // Check server configuration & subscribe to storage updates
+  useEffect(() => {
+    fetch('/api/status')
+      .then((res) => res.json())
+      .then((data) => {
+        if (data && data.hasEnvKey !== undefined) {
+          setHasEnvKey(Boolean(data.hasEnvKey));
+        }
+      })
+      .catch((err) => {
+        console.warn('Could not query /api/status:', err);
+      });
+
+    const onKeyChanged = () => {
+      setHasBrowserKey(Boolean(getStoredApiKey()));
+    };
+    window.addEventListener('infinity_api_key_changed', onKeyChanged);
+    return () => window.removeEventListener('infinity_api_key_changed', onKeyChanged);
+  }, []);
 
   // Reset completely to default generic material (neutral surface with no material applied)
   const handleClearToGeneric = async () => {
@@ -149,13 +192,16 @@ export default function App() {
         try {
           const res = await fetch('/api/analyze-material', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: getApiHeaders(),
             body: JSON.stringify({
               imageBase64: dataUrl,
               prompt: file.name.replace(/\.[^/.]+$/, ''),
             }),
           });
           const json = await res.json();
+          if (json.educationalNotice) {
+            setEducationalNotice(json.educationalNotice);
+          }
           if (json.material) {
             updatedProperties = {
               ...updatedProperties,
@@ -165,7 +211,7 @@ export default function App() {
             };
           }
         } catch (aiErr) {
-          console.warn('Gemini analysis error, using defaults:', aiErr);
+          console.warn('Analysis error, using defaults:', aiErr);
         }
 
         setMaterial(updatedProperties);
@@ -196,10 +242,13 @@ export default function App() {
       try {
         const response = await fetch('/api/analyze-material', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: getApiHeaders(),
           body: JSON.stringify({ prompt }),
         });
         const data = await response.json();
+        if (data.educationalNotice) {
+          setEducationalNotice(data.educationalNotice);
+        }
         if (data.material) {
           pbrProps = {
             ...pbrProps,
@@ -274,30 +323,28 @@ export default function App() {
         <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-3">
           {/* Logo & Title */}
           <div className="flex items-center gap-3">
-            <div className="w-8 h-8 bg-gradient-to-br from-cyan-400 to-blue-600 rounded-lg flex items-center justify-center font-bold text-black text-lg glow-cyan-sm">
-              T
-            </div>
+            <InfinityLogo className="w-9 h-9 sm:w-10 sm:h-10 shrink-0 drop-shadow-md" />
             <div>
               <div className="flex items-center gap-2">
-                <h1 className="text-base sm:text-lg font-bold tracking-tight text-white uppercase">
-                  Texture<span className="text-cyan-400">Gen</span>.AI
+                <h1 className="text-base sm:text-lg font-bold tracking-tight text-white uppercase font-mono">
+                  {t('appTitle')} <span className="text-cyan-400">{t('appSubtitle')}</span>
                 </h1>
                 <span className="px-2 py-0.5 text-[9px] font-bold bg-cyan-500/10 text-cyan-400 border border-cyan-500/30 rounded-full tracking-wider uppercase">
-                  4K PBR
+                  {t('headerBadge')}
                 </span>
               </div>
               <p className="text-[10px] text-gray-500 font-medium tracking-wide">
-                Difusão · Especular · Normal · Rugosidade · Deslocamento · Blender · Unreal · Unity · V-Ray
+                {t('headerDesc')}
               </p>
             </div>
           </div>
 
-          {/* Quick System Indicators & Download Full Bundle Button */}
-          <div className="flex items-center gap-4">
-            <div className="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white/5 border border-white/5 text-[10px] font-mono">
+          {/* Quick System Indicators, Language Selector & Download Full Bundle Button */}
+          <div className="flex items-center gap-2 sm:gap-3">
+            <div className="hidden lg:flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white/5 border border-white/5 text-[10px] font-mono">
               <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse"></span>
-              <span className="text-gray-400 uppercase tracking-wider">Engine:</span>
-              <span className="text-cyan-400 font-semibold uppercase">PBR Canvas + Sobel 4K</span>
+              <span className="text-gray-400 uppercase tracking-wider">{t('engineLabel')}</span>
+              <span className="text-cyan-400 font-semibold uppercase">{t('engineStatus')}</span>
             </div>
 
             <button
@@ -305,7 +352,7 @@ export default function App() {
               id="btn-download-full-zip"
               onClick={handleDownloadZip}
               disabled={isExportingZip || isProcessing || !maps}
-              className="px-4 py-2 bg-cyan-500 hover:bg-cyan-400 active:scale-[0.98] text-black font-bold rounded-md flex items-center gap-2 text-xs transition-all glow-cyan disabled:opacity-40 disabled:cursor-not-allowed uppercase tracking-wider"
+              className="px-3.5 sm:px-4 py-2 bg-cyan-500 hover:bg-cyan-400 active:scale-[0.98] text-black font-bold rounded-md flex items-center gap-2 text-xs transition-all glow-cyan disabled:opacity-40 disabled:cursor-not-allowed uppercase tracking-wider font-mono cursor-pointer"
             >
               {isExportingZip ? (
                 <Loader2 className="w-3.5 h-3.5 animate-spin text-black" />
@@ -314,9 +361,23 @@ export default function App() {
               )}
               <span>
                 {isExportingZip
-                  ? zipProgress.message || 'Compactando...'
-                  : 'EXPORT BUNDLE (4K)'}
+                  ? zipProgress.message || t('exporting')
+                  : `${t('exportBundle')} (${resolution === 4096 ? '4K' : resolution === 2048 ? '2K' : '1K'})`}
               </span>
+            </button>
+
+            {/* Language Selector beside Export Bundle */}
+            <LanguageSelector />
+
+            {/* Open Core & AI Key Settings Gear Button */}
+            <button
+              type="button"
+              id="btn-open-settings-gear"
+              onClick={() => setIsSettingsOpen(true)}
+              title={t('openCoreSettingsTitle')}
+              className="p-2 rounded-md bg-white/5 hover:bg-white/10 text-gray-300 hover:text-cyan-400 border border-white/10 transition-colors flex items-center justify-center cursor-pointer"
+            >
+              <Settings className="w-4 h-4" />
             </button>
           </div>
         </div>
@@ -330,6 +391,11 @@ export default function App() {
             isGenerating={isProcessing}
             onGenerateFromPrompt={handleGenerateFromPrompt}
             onUploadImage={handleUploadImage}
+            hasAiKey={hasEnvKey || hasBrowserKey}
+            hasEnvKey={hasEnvKey}
+            onOpenSettings={() => setIsSettingsOpen(true)}
+            educationalNotice={educationalNotice}
+            onDismissEducationalNotice={() => setEducationalNotice(null)}
           />
         </section>
 
@@ -362,7 +428,7 @@ export default function App() {
           <div className="flex flex-col gap-2">
             <div className="flex items-center justify-between px-1">
               <span className="text-[10px] font-bold uppercase tracking-widest text-cyan-400/80">
-                Inspeção dos Mapas PBR Individuais & Repetição Seamless 2D
+                {t('inspectionTitle')}
               </span>
               <span className="text-[10px] font-mono text-cyan-400 flex items-center gap-1">
                 <CheckCircle2 className="w-3 h-3 text-cyan-400" />
@@ -403,18 +469,26 @@ export default function App() {
         <section className="glass rounded-xl p-4 text-xs text-gray-400 space-y-2">
           <div className="flex items-center gap-2 text-white font-semibold">
             <Info className="w-4 h-4 text-cyan-400" />
-            <span className="text-xs uppercase tracking-wider font-bold">Estrutura do Pacote ZIP Exportado</span>
+            <span className="text-xs uppercase tracking-wider font-bold">{t('zipStructureTitle')}</span>
           </div>
           <p className="leading-relaxed text-gray-400 text-[11px]">
-            O arquivo comprimido contém todos os 5 mapas obrigatórios em JPEG de alta definição (Difusão/Albedo, Especular, Normal Tangent Space, Rugosidade, Deslocamento/Height e Oclusão Ambiental), o script Python de 1-clique para o Blender (<code className="text-cyan-300 font-mono">setup_pbr_blender.py</code>), as especificações técnicas em <code className="text-cyan-300 font-mono">material_settings.json</code> e o guia completo em formato texto com o passo a passo para Blender, V-Ray, Unity e Unreal Engine (<code className="text-cyan-300 font-mono">MATERIAL_CONFIG_BLENDER_VRAY_UNITY_UNREAL.txt</code>).
+            {t('zipStructureDesc')}
           </p>
         </section>
       </main>
 
       {/* Footer */}
       <footer className="border-t border-white/5 py-4 px-6 text-center text-[11px] text-gray-500 font-mono relative z-10">
-        TextureGen.AI · Seamless PBR Texture Generator 4K · Immersive Studio Engine
+        Infinity Texture Generator · Seamless PBR Texture Studio 4K · Immersive Physical Engine
       </footer>
+
+      {/* Open Core & AI Key Settings Modal */}
+      <ApiKeySettingsModal
+        isOpen={isSettingsOpen}
+        onClose={() => setIsSettingsOpen(false)}
+        hasEnvKey={hasEnvKey}
+        onKeyUpdated={() => setHasBrowserKey(Boolean(getStoredApiKey()))}
+      />
     </div>
   );
 }

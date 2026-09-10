@@ -1,3 +1,13 @@
+/*
+ * Infinity Texture Generator
+ * Copyright (C) 2026 BRENO ARAGÃO SOUZA
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ */
+
 import express from 'express';
 import path from 'path';
 import { createServer as createViteServer } from 'vite';
@@ -10,20 +20,83 @@ const PORT = 3000;
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
-// Lazy initialization of Gemini AI
-let aiClient: GoogleGenAI | null = null;
-function getAIClient(): GoogleGenAI | null {
-  if (!aiClient && process.env.GEMINI_API_KEY) {
-    aiClient = new GoogleGenAI({
-      apiKey: process.env.GEMINI_API_KEY,
-    });
+// Dynamic initialization of Gemini AI supporting environment variable and optional client-provided key
+function getAIClient(customKey?: string): GoogleGenAI | null {
+  const key = (customKey && customKey.trim()) || (process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY.trim());
+  if (!key) {
+    return null;
   }
-  return aiClient;
+  return new GoogleGenAI({
+    apiKey: key,
+    httpOptions: {
+      headers: {
+        'User-Agent': 'aistudio-build',
+      },
+    },
+  });
 }
 
-// Health check
+// Health and Open Core Status check
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', hasGeminiKey: Boolean(process.env.GEMINI_API_KEY) });
+  const hasEnvKey = Boolean(process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY.trim());
+  res.json({
+    status: 'ok',
+    hasEnvKey,
+    hasGeminiKey: hasEnvKey,
+    openCoreMode: true,
+  });
+});
+
+app.get('/api/status', (req, res) => {
+  const hasEnvKey = Boolean(process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY.trim());
+  res.json({
+    status: 'ok',
+    hasEnvKey,
+    openCoreMode: true,
+    message: hasEnvKey
+      ? 'Chave GEMINI_API_KEY detectada no ambiente do servidor.'
+      : 'Modo Open Core ativo: Nenhuma chave de IA detectada no ambiente. Classificador determinístico local disponível.',
+  });
+});
+
+// Validate Gemini API Key endpoint for the developer settings modal
+app.post('/api/validate-key', async (req, res) => {
+  try {
+    const clientApiKey = (req.headers['x-gemini-api-key'] as string) || req.body?.apiKey;
+    const ai = getAIClient(clientApiKey);
+    if (!ai) {
+      return res.json({
+        valid: false,
+        hasKey: false,
+        message: 'Nenhuma chave fornecida no navegador ou configurada no ambiente.',
+      });
+    }
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-3.8-flash',
+      contents: 'Ping test',
+    });
+
+    if (response.text) {
+      return res.json({
+        valid: true,
+        hasKey: true,
+        message: 'Chave Gemini API conectada e validada com sucesso!',
+      });
+    }
+
+    return res.json({
+      valid: false,
+      hasKey: true,
+      message: 'Não foi possível obter resposta de teste do modelo Gemini.',
+    });
+  } catch (err: any) {
+    return res.json({
+      valid: false,
+      hasKey: true,
+      message: err?.message || 'Erro ao validar a chave da API Gemini.',
+    });
+  }
 });
 
 const OFFICIAL_CATEGORIES = [
@@ -372,16 +445,25 @@ function classifyMaterialLocally(prompt: string) {
 app.post('/api/analyze-material', async (req, res) => {
   try {
     const { prompt, imageBase64 } = req.body;
+    const clientApiKey = req.headers['x-gemini-api-key'] as string | undefined;
 
     if (!prompt && !imageBase64) {
-      return res.status(400).json({ error: 'Prompt or image is required' });
+      return res.status(400).json({ error: 'Prompt ou imagem é obrigatório.' });
     }
 
+    // Always compute the deterministic local classification first (Zero API dependency, Open Core)
     const fallbackClassification = classifyMaterialLocally(prompt || 'Textura');
-    const ai = getAIClient();
+    const ai = getAIClient(clientApiKey);
 
+    // If no key exists in environment or client header, seamlessly use the local deterministic classifier
     if (!ai) {
-      return res.json({ material: fallbackClassification });
+      return res.json({
+        material: fallbackClassification,
+        isAIAvailable: false,
+        source: 'local_deterministic',
+        educationalNotice:
+          'Modo Open Core ativo: Material sintetizado através do classificador determinístico local (nenhuma chave de IA detectada no ambiente ou no navegador).',
+      });
     }
 
     const systemInstruction = `You are an expert 3D PBR Material Artist and Technical Shader Specialist.
@@ -429,14 +511,13 @@ Output STRICT JSON with physical PBR values:
     parts.push({ text: textQuery });
 
     // Helper with timeout to prevent blocking on network latency
-    const callWithTimeout = <T>(promise: Promise<T>, timeoutMs = 4000): Promise<T> => {
+    const callWithTimeout = <T>(promise: Promise<T>, timeoutMs = 4500): Promise<T> => {
       return Promise.race([
         promise,
         new Promise<T>((_, reject) => setTimeout(() => reject(new Error('AI Request Timeout')), timeoutMs)),
       ]);
     };
 
-    // Attempt generation with primary model, then secondary model if high demand
     let text = '';
     try {
       const response = await callWithTimeout(
@@ -452,7 +533,7 @@ Output STRICT JSON with physical PBR values:
       );
       text = response.text?.trim() || '';
     } catch (primaryErr: any) {
-      console.warn('Gemini 3.8 Flash unavailable or timeout, trying gemini-3.1-flash-lite...', primaryErr.message);
+      console.warn('Gemini 3.8 Flash indisponível ou timeout, tentando gemini-3.1-flash-lite...', primaryErr?.message);
       try {
         const responseLite = await callWithTimeout(
           ai.models.generateContent({
@@ -467,29 +548,44 @@ Output STRICT JSON with physical PBR values:
         );
         text = responseLite.text?.trim() || '';
       } catch (secondaryErr: any) {
-        console.warn('Gemini models unavailable, utilizing intelligent local classifier:', secondaryErr.message);
+        console.warn('Modelos Gemini indisponíveis, acionando classificador determinístico local:', secondaryErr?.message);
       }
     }
 
     if (text) {
       try {
         const parsed = JSON.parse(text);
-        // Ensure valid category
         if (!OFFICIAL_CATEGORIES.includes(parsed.category)) {
           parsed.category = fallbackClassification.category;
         }
-        return res.json({ material: { ...fallbackClassification, ...parsed } });
+        return res.json({
+          material: { ...fallbackClassification, ...parsed },
+          isAIAvailable: true,
+          source: 'gemini_ai',
+        });
       } catch (err) {
-        console.warn('Could not parse JSON from Gemini response, using fallback classification');
+        console.warn('Não foi possível interpretar JSON retornado pelo Gemini, usando classificação local');
       }
     }
 
-    return res.json({ material: fallbackClassification });
+    return res.json({
+      material: fallbackClassification,
+      isAIAvailable: false,
+      source: 'local_deterministic_fallback',
+      educationalNotice:
+        'Aviso Open Core: Não foi possível obter resposta do modelo Gemini. O classificador determinístico local seguro foi utilizado.',
+    });
   } catch (error: any) {
-    console.error('Error analyzing material:', error);
-    // Never fail with 500, always return valid fallback
+    console.error('Erro na análise de material:', error);
+    // Never fail with 500 error, always return valid fallback
     const local = classifyMaterialLocally(req.body?.prompt || '');
-    return res.json({ material: local });
+    return res.json({
+      material: local,
+      isAIAvailable: false,
+      source: 'local_deterministic_error',
+      educationalNotice:
+        'Aviso Open Core: Ocorreu uma exceção na requisição de IA. O sistema acionou o classificador determinístico local seguro.',
+    });
   }
 });
 
@@ -499,14 +595,19 @@ Output STRICT JSON with physical PBR values:
 app.post('/api/generate-texture-image', async (req, res) => {
   try {
     const { prompt } = req.body;
+    const clientApiKey = req.headers['x-gemini-api-key'] as string | undefined;
+
     if (!prompt) {
-      return res.status(400).json({ error: 'Prompt is required' });
+      return res.status(400).json({ error: 'Prompt é obrigatório.' });
     }
 
-    const ai = getAIClient();
+    const ai = getAIClient(clientApiKey);
     if (!ai) {
-      return res.status(400).json({
-        error: 'Chave GEMINI_API_KEY não configurada no painel Settings > Secrets',
+      return res.json({
+        success: false,
+        isAIAvailable: false,
+        message:
+          'Chave GEMINI_API_KEY não encontrada. Configure a variável de ambiente no servidor ou use a engrenagem no topo para colar sua chave no navegador.',
       });
     }
 
@@ -535,13 +636,19 @@ app.post('/api/generate-texture-image', async (req, res) => {
     }
 
     if (!generatedImageUrl) {
-      return res.status(500).json({ error: 'Nenhuma imagem foi retornada pelo modelo.' });
+      return res.json({
+        success: false,
+        message: 'Nenhuma imagem foi retornada pelo modelo Gemini.',
+      });
     }
 
-    return res.json({ imageUrl: generatedImageUrl });
+    return res.json({ success: true, imageUrl: generatedImageUrl });
   } catch (error: any) {
     console.error('Error generating texture image:', error);
-    return res.status(500).json({ error: error.message || 'Erro ao gerar imagem de textura.' });
+    return res.json({
+      success: false,
+      message: error?.message || 'Erro ao gerar imagem de textura com IA.',
+    });
   }
 });
 

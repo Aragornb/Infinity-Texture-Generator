@@ -1,3 +1,13 @@
+/*
+ * Infinity Texture Generator
+ * Copyright (C) 2026 BRENO ARAGÃO SOUZA
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ */
+
 import { MaterialProperties, PBRMapData, TextureResolution } from '../types';
 
 /**
@@ -344,7 +354,7 @@ export async function generatePBRMaps(
   const specImgData = specCtx.createImageData(resolution, resolution);
   const specData = specImgData.data;
 
-  const specFactor = properties.specularLevel || 0.5;
+  const specFactor = properties.specularLevel !== undefined ? properties.specularLevel : 0.5;
 
   for (let i = 0; i < totalPixels; i++) {
     const idx = i * 4;
@@ -355,14 +365,13 @@ export async function generatePBRMaps(
     if (properties.metallic > 0.5) {
       // Metallic specular is colored by the diffuse albedo
       const m = properties.metallic;
-      sR = src[idx] * m + 255 * (1 - m) * 0.04 * specFactor;
-      sG = src[idx + 1] * m + 255 * (1 - m) * 0.04 * specFactor;
-      sB = src[idx + 2] * m + 255 * (1 - m) * 0.04 * specFactor;
+      sR = src[idx] * m * Math.max(0.1, specFactor) + 255 * (1 - m) * 0.08 * specFactor;
+      sG = src[idx + 1] * m * Math.max(0.1, specFactor) + 255 * (1 - m) * 0.08 * specFactor;
+      sB = src[idx + 2] * m * Math.max(0.1, specFactor) + 255 * (1 - m) * 0.08 * specFactor;
     } else {
-      // Dielectric specular is monochromatic (around 0.04 default F0)
-      // Scaled by specular level (0.5 = 0.04 F0 -> ~60 byte value)
-      const baseF0 = 0.04 * specFactor * 2.0;
-      const microContrast = (lum[i] - 0.5) * 0.02;
+      // Dielectric specular: scaled by reflection level (0.0 = completely matte black specular, 0.5 = standard 4% dielectric, 1.0 = highly reflective finish)
+      const baseF0 = specFactor * 0.16;
+      const microContrast = (lum[i] - 0.5) * 0.04 * specFactor;
       const val = Math.min(255, Math.max(0, Math.round((baseF0 + microContrast) * 255)));
       sR = val;
       sG = val;

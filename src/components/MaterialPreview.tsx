@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
 import { MaterialProperties, PBRMapData } from '../types';
+import { useLanguage } from '../i18n/LanguageContext';
 import {
   Box,
   Camera,
@@ -34,16 +35,27 @@ function createDrapedClothOverSphereGeometry(): THREE.BufferGeometry {
   const size = 2.9;
   const geo = new THREE.PlaneGeometry(size, size, segments, segments);
   const pos = geo.attributes.position;
+  const index = geo.index;
 
-  // Inner sphere has radius 0.94 in Three.js scene
-  // Cloth has collision margin of 0.025 => minimum obstacle radius is 0.965
-  const innerSphereRadius = 0.94;
+  // Invert triangle index winding order so generated vertex normals point strictly OUTWARD (away from sphere)
+  if (index) {
+    for (let i = 0; i < index.count; i += 3) {
+      const a = index.getX(i);
+      const b = index.getX(i + 1);
+      index.setX(i, b);
+      index.setX(i + 1, a);
+    }
+  }
+
+  // Inner obstacle sphere radius is 0.92 in Three.js scene
+  // Cloth barrier radius is 0.965 => guaranteed non-penetrating safety clearance of at least 0.045 units
+  const innerSphereRadius = 0.92;
   const clothBarrierRadius = 0.965;
   const halfSize = size / 2; // 1.45
 
-  // Detachment latitude ~ 48 degrees (0.838 rad) where cloth starts fluting into outward pleats
-  const phiDetach = 0.838;
-  const sDetach = clothBarrierRadius * phiDetach; // ~ 0.808
+  // Detachment latitude ~ 47 degrees (0.82 rad) where cloth starts fluting into outward pleats
+  const phiDetach = 0.82;
+  const sDetach = clothBarrierRadius * phiDetach;
 
   for (let i = 0; i < pos.count; i++) {
     const u = pos.getX(i); // in [-1.45, 1.45]
@@ -76,14 +88,14 @@ function createDrapedClothOverSphereGeometry(): THREE.BufferGeometry {
       const cornerFactor = (sMax - halfSize) / Math.max(0.001, halfSize * (Math.SQRT2 - 1)); // 0 to 1
 
       // Latitude progresses past equator smoothly
-      const phi = phiDetach + (Math.PI * 0.52 - phiDetach) * Math.pow(t, 0.82);
+      const phi = phiDetach + (Math.PI * 0.53 - phiDetach) * Math.pow(t, 0.82);
 
       // Base sphere coordinate at this latitude
       const rBaseSphere = clothBarrierRadius * Math.sin(phi);
       const yBaseSphere = clothBarrierRadius * Math.cos(phi);
 
       // Downward gravity drop: smooth acceleration downwards once approaching and clearing equator
-      const gravityDrop = 0.72 * Math.pow(t, 1.35) + 0.35 * cornerFactor * Math.pow(t, 1.15);
+      const gravityDrop = 0.76 * Math.pow(t, 1.35) + 0.38 * cornerFactor * Math.pow(t, 1.15);
       yVal = yBaseSphere - gravityDrop;
 
       // Calculate horizontal radius of the obstacle sphere at this specific yVal
@@ -93,16 +105,16 @@ function createDrapedClothOverSphereGeometry(): THREE.BufferGeometry {
       }
 
       // Base clearance from sphere: flares outward as fabric gathers excess circumference
-      const baseFlare = 0.015 + 0.12 * Math.pow(t, 1.2) + 0.10 * cornerFactor * t;
+      const baseFlare = 0.02 + 0.14 * Math.pow(t, 1.2) + 0.12 * cornerFactor * t;
 
       // Outward pleats & drapery waves: strictly positive wave (>= 0) so folds buckle away from sphere
       // 8 primary flutes aligned with corners + edges, plus harmonic micro-creases
       const fluteWave =
-        Math.pow(Math.cos(4 * theta), 2) * 0.14 +
-        Math.pow(Math.sin(6 * theta + 0.25), 2) * 0.06 +
+        Math.pow(Math.cos(4 * theta), 2) * 0.16 +
+        Math.pow(Math.sin(6 * theta + 0.25), 2) * 0.07 +
         Math.pow(Math.cos(8 * theta), 2) * 0.04;
 
-      const waveEnvelope = Math.pow(t, 1.4) * (1.0 + 0.45 * cornerFactor);
+      const waveEnvelope = Math.pow(t, 1.3) * (1.0 + 0.45 * cornerFactor);
       const outwardDisplacement = fluteWave * waveEnvelope;
 
       // Effective horizontal radius
@@ -112,12 +124,12 @@ function createDrapedClothOverSphereGeometry(): THREE.BufferGeometry {
       zVal = rCandidate * Math.sin(theta);
 
       // Subtle vertical ripple along the pleat peaks
-      const yRipple = Math.cos(8 * theta) * 0.035 * Math.pow(t, 1.5);
+      const yRipple = Math.cos(8 * theta) * 0.03 * Math.pow(t, 1.5);
       yVal += yRipple;
     }
 
-    // STRICT UNILATERAL PHYSICAL BARRIER CONSTRAINT:
-    // Guarantees zero penetration into the inner sphere (radius 0.94) from any angle
+    // STRICT UNILATERAL PHYSICAL BARRIER CONSTRAINTS:
+    // 1. Guaranteed radial clearance from sphere center (0, 0, 0)
     const dist3D = Math.sqrt(xVal * xVal + yVal * yVal + zVal * zVal);
     if (dist3D < clothBarrierRadius) {
       const push = clothBarrierRadius / Math.max(0.0001, dist3D);
@@ -126,12 +138,12 @@ function createDrapedClothOverSphereGeometry(): THREE.BufferGeometry {
       zVal *= push;
     }
 
-    // Cylindrical obstacle check: ensure horizontal radius is strictly outside the sphere slice at height y
-    if (yVal > -innerSphereRadius && yVal < innerSphereRadius) {
-      const rSphereSlice = Math.sqrt(innerSphereRadius * innerSphereRadius - yVal * yVal) + 0.018;
-      const rActual = Math.sqrt(xVal * xVal + zVal * zVal);
-      if (rActual < rSphereSlice) {
-        const rPush = rSphereSlice / Math.max(0.0001, rActual);
+    // 2. Strict horizontal clearance from sphere profile at height yVal
+    if (yVal > -clothBarrierRadius && yVal < clothBarrierRadius) {
+      const rMinAtY = Math.sqrt(clothBarrierRadius * clothBarrierRadius - yVal * yVal) + 0.02;
+      const rHoriz = Math.sqrt(xVal * xVal + zVal * zVal);
+      if (rHoriz < rMinAtY) {
+        const rPush = rMinAtY / Math.max(0.0001, rHoriz);
         xVal *= rPush;
         zVal *= rPush;
       }
@@ -182,7 +194,16 @@ export const MaterialPreview: React.FC<MaterialPreviewProps> = ({
   const [meshType, setMeshType] = useState<PreviewMeshType>('sphere');
   const [lighting, setLighting] = useState<LightingPreset>('studio');
   const [enableDisplacement, setEnableDisplacement] = useState<boolean>(true);
-  const [tiling, setTiling] = useState<number>(1);
+  const [tiling, setTiling] = useState<number>(material.seamlessTiling || 1);
+
+  const { t } = useLanguage();
+
+  // Sync internal tiling state if material.seamlessTiling changes from controls
+  useEffect(() => {
+    if (material.seamlessTiling !== undefined) {
+      setTiling(material.seamlessTiling);
+    }
+  }, [material.seamlessTiling]);
 
   // Drag interaction state (only renders on drag, no continuous animation loop)
   const isDraggingRef = useRef<boolean>(false);
@@ -264,7 +285,7 @@ export const MaterialPreview: React.FC<MaterialPreviewProps> = ({
     scene.add(mesh);
 
     // Inner sphere displayed underneath the draped cloth geometry
-    const innerSphereGeo = new THREE.SphereGeometry(0.94, 64, 64);
+    const innerSphereGeo = new THREE.SphereGeometry(0.92, 64, 64);
     const innerSphereMat = new THREE.MeshStandardMaterial({
       color: 0x161922,
       roughness: 0.28,
@@ -477,6 +498,8 @@ export const MaterialPreview: React.FC<MaterialPreviewProps> = ({
     pbrMat.roughness = material.baseRoughness;
     pbrMat.metalness = material.metallic;
     pbrMat.ior = material.ior || 1.5;
+    pbrMat.reflectivity = material.specularLevel !== undefined ? material.specularLevel : 0.5;
+    (pbrMat as any).specularIntensity = material.specularLevel !== undefined ? material.specularLevel : 0.5;
     pbrMat.transmission = material.transparency ?? 0;
     pbrMat.transparent = (material.transparency ?? 0) > 0;
     pbrMat.opacity = Math.max(0.12, 1.0 - (material.transparency ?? 0) * 0.45);
@@ -548,9 +571,9 @@ export const MaterialPreview: React.FC<MaterialPreviewProps> = ({
         setupTexture(tex, false);
         pbrMat.displacementMap = tex;
         pbrMat.displacementScale = enableDisplacement
-          ? material.displacementScale * 2.2
+          ? material.displacementScale * (meshType === 'cloth' ? 1.0 : 2.0)
           : 0;
-        pbrMat.displacementBias = -0.01;
+        pbrMat.displacementBias = 0;
         loadedTextures.displacement = tex;
         pbrMat.needsUpdate = true;
         checkAllLoaded();
@@ -645,14 +668,14 @@ export const MaterialPreview: React.FC<MaterialPreviewProps> = ({
           <div>
             <div className="flex items-center gap-2">
               <h3 className="text-xs font-bold text-white uppercase tracking-wider font-mono">
-                PREVIEW DO MATERIAL PBR
+                {t('previewTitle')}
               </h3>
               <span className="px-2 py-0.5 rounded text-[9px] font-mono bg-cyan-500/15 text-cyan-300 border border-cyan-500/30">
-                On-Demand (Zero Lag)
+                {t('previewBadge')}
               </span>
             </div>
             <p className="text-[10px] text-gray-400 font-mono">
-              Renderizado instantâneo ao recalcular mapas
+              {t('previewDesc')}
             </p>
           </div>
         </div>
@@ -663,22 +686,22 @@ export const MaterialPreview: React.FC<MaterialPreviewProps> = ({
             type="button"
             id="btn-preview-reset-rot"
             onClick={handleResetRotation}
-            title="Resetar rotação da câmera"
+            title={t('resetAngle')}
             className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white border border-white/5 transition-all text-xs font-mono flex items-center gap-1"
           >
             <RotateCcw className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline text-[10px]">Reset Ângulo</span>
+            <span className="hidden sm:inline text-[10px]">{t('resetAngle')}</span>
           </button>
 
           <button
             type="button"
             id="btn-preview-snapshot"
             onClick={handleDownloadSnapshot}
-            title="Exportar imagem renderizada do preview"
+            title={t('snapshotHd')}
             className="px-2.5 py-1.5 rounded-lg bg-white/5 hover:bg-cyan-500/20 text-gray-300 hover:text-cyan-300 border border-white/10 transition-all text-xs font-mono flex items-center gap-1.5"
           >
             <Camera className="w-3.5 h-3.5 text-cyan-400" />
-            <span className="text-[10px] font-bold">Snapshot HD</span>
+            <span className="text-[10px] font-bold">{t('snapshotHd')}</span>
           </button>
         </div>
       </div>
@@ -706,7 +729,7 @@ export const MaterialPreview: React.FC<MaterialPreviewProps> = ({
           <div className="absolute inset-0 bg-black/60 backdrop-blur-xs flex flex-col items-center justify-center gap-2 z-20 pointer-events-none">
             <RefreshCw className="w-6 h-6 text-cyan-400 animate-spin" />
             <span className="text-xs font-mono text-cyan-200 tracking-wide">
-              Recalculando mapas e renderizando preview...
+              {t('recalculatingOverlay')}
             </span>
           </div>
         )}
@@ -714,7 +737,7 @@ export const MaterialPreview: React.FC<MaterialPreviewProps> = ({
         {/* Orbit Hint Badge */}
         <div className="absolute bottom-3 left-3 pointer-events-none z-10 px-2.5 py-1 rounded-md bg-black/70 backdrop-blur-md border border-white/10 text-[10px] text-gray-400 font-mono flex items-center gap-1.5">
           <span className="w-1.5 h-1.5 rounded-full bg-cyan-400"></span>
-          <span>Arraste com o mouse para girar o ângulo de luz</span>
+          <span>{t('orbitHint')}</span>
         </div>
 
         {/* Material Specs Floating Badge */}
@@ -726,16 +749,16 @@ export const MaterialPreview: React.FC<MaterialPreviewProps> = ({
             Normal: {material.normalStrength.toFixed(1)}x ({material.normalFormat})
           </span>
           <span className="px-1.5 py-0.5 rounded bg-black/50 text-gray-400 border border-white/5">
-            Displacement: {enableDisplacement ? `${material.displacementScale.toFixed(3)}m` : 'Desligado'}
+            Displacement: {enableDisplacement ? `${material.displacementScale.toFixed(3)}m` : 'Off'}
           </span>
           {(material.transparency ?? 0) > 0 && (
             <span className="px-1.5 py-0.5 rounded bg-cyan-950/80 text-cyan-300 border border-cyan-500/30">
-              Transparência: {Math.round((material.transparency ?? 0) * 100)}% (IOR: {(material.ior ?? 1.5).toFixed(2)})
+              {t('transparency')}: {Math.round((material.transparency ?? 0) * 100)}% (IOR: {(material.ior ?? 1.5).toFixed(2)})
             </span>
           )}
           {(material.emissiveIntensity ?? 0) > 0 && (
             <span className="px-1.5 py-0.5 rounded bg-yellow-950/80 text-yellow-300 border border-yellow-500/30">
-              Emissão: {(material.emissiveIntensity ?? 0).toFixed(2)}x
+              {t('emissive')}: {(material.emissiveIntensity ?? 0).toFixed(2)}x
             </span>
           )}
         </div>
@@ -745,14 +768,14 @@ export const MaterialPreview: React.FC<MaterialPreviewProps> = ({
       <div className="p-3 border-t border-white/5 bg-[#07080d] flex flex-wrap items-center justify-between gap-4 text-xs font-mono">
         {/* Geometry Switcher */}
         <div className="flex items-center gap-1.5">
-          <span className="text-gray-500 text-[10px] uppercase tracking-wider mr-1">Geometria:</span>
+          <span className="text-gray-500 text-[10px] uppercase tracking-wider mr-1">{t('geomLabel')}</span>
           {(
             [
-              { id: 'sphere', label: 'Esfera', icon: Circle },
-              { id: 'cube', label: 'Cubo', icon: Box },
-              { id: 'cylinder', label: 'Cilindro', icon: Cylinder },
-              { id: 'plane', label: 'Plano', icon: Square },
-              { id: 'cloth', label: 'Tecido', icon: Waves },
+              { id: 'sphere', label: t('geomSphere'), icon: Circle },
+              { id: 'cube', label: t('geomCube'), icon: Box },
+              { id: 'cylinder', label: t('geomCylinder'), icon: Cylinder },
+              { id: 'plane', label: t('geomPlane'), icon: Square },
+              { id: 'cloth', label: t('geomCloth'), icon: Waves },
             ] as const
           ).map((item) => {
             const Icon = item.icon;
@@ -780,13 +803,13 @@ export const MaterialPreview: React.FC<MaterialPreviewProps> = ({
         <div className="flex flex-wrap items-center gap-2">
           {/* Lighting Presets */}
           <div className="flex items-center gap-1 bg-black/40 p-1 rounded-lg border border-white/5">
-            <span className="text-gray-500 text-[9px] uppercase px-1">Luz:</span>
+            <span className="text-gray-500 text-[9px] uppercase px-1">{t('lightLabel')}</span>
             {(
               [
-                { id: 'studio', label: 'Estúdio' },
-                { id: 'raking', label: 'Rasante (Relevo)' },
-                { id: 'warm', label: 'Quente' },
-                { id: 'contrast', label: 'Contraste' },
+                { id: 'studio', label: t('lightStudio') },
+                { id: 'raking', label: t('lightRaking') },
+                { id: 'warm', label: t('lightWarm') },
+                { id: 'contrast', label: t('lightContrast') },
               ] as const
             ).map((l) => (
               <button
@@ -822,8 +845,8 @@ export const MaterialPreview: React.FC<MaterialPreviewProps> = ({
 
           {/* Tiling repeat */}
           <div className="flex items-center gap-1 bg-black/40 px-2 py-1 rounded-md border border-white/5 text-[10px]">
-            <span className="text-gray-500">Repetição:</span>
-            {[1, 2, 3].map((n) => (
+            <span className="text-gray-500">{t('tilingLabel')}</span>
+            {[1, 2, 3, 4].map((n) => (
               <button
                 key={n}
                 type="button"
