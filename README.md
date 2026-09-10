@@ -19,15 +19,27 @@ Crie mapas PBR completos (Albedo, Normal, Roughness, Especular, Displacement e A
 
 ## 📖 Sobre
 
-O **Infinity Texture Generator** é uma aplicação web que gera materiais PBR (Physically Based Rendering) tileáveis (seamless) sem depender de bibliotecas de texturas prontas. A partir de uma descrição em texto (ex.: *"mármore Calacatta com veios dourados"*) ou de uma imagem de referência enviada pelo usuário, o app:
+O **Infinity Texture Generator** é uma aplicação web **Open Core** que gera materiais PBR (Physically Based Rendering) tileáveis (seamless) sem depender de bibliotecas de texturas prontas. A partir de uma descrição em texto (ex.: *"mármore Calacatta com veios dourados"*) ou de uma imagem de referência enviada pelo usuário, o app:
 
-1. Classifica o material (categoria, cor, rugosidade, IOR, metalicidade etc.) usando a API Gemini, com um classificador local determinístico como fallback offline;
+1. Classifica o material (categoria, cor, rugosidade, IOR, metalicidade etc.) usando um **classificador local determinístico** (núcleo aberto e 100% offline) ou, opcionalmente, a **API Gemini** para uma interpretação mais rica do prompt;
 2. Sintetiza proceduralmente uma textura base seamless no canvas;
 3. Deriva todos os mapas PBR (Normal, Roughness, Especular, Displacement, AO) a partir dessa base;
 4. Renderiza um preview 3D fisicamente correto em tempo real; e
 5. Exporta o pacote completo, já configurado para o software 3D de sua escolha.
 
-Todo o processamento de imagem acontece no **Canvas 2D do navegador** — não há geração de imagem por IA nem dependência de texturas externas; a IA é usada apenas para interpretar a descrição do material e definir seus parâmetros físicos.
+Todo o processamento de imagem acontece no **Canvas 2D do navegador** — não há geração de imagem por IA nem dependência de texturas externas; quando habilitada, a IA é usada apenas para interpretar a descrição do material e definir seus parâmetros físicos.
+
+## 🧩 Arquitetura Open Core
+
+O projeto é **open core**: o motor completo de geração de texturas (síntese procedural, derivação de mapas PBR, presets, preview 3D e exportação) é **100% aberto, gratuito e funcional offline**, sem nenhuma dependência de nuvem ou serviço pago. A camada de IA generativa (classificação de materiais via Gemini) é uma **camada opcional** que pode ser ativada de três formas, configuráveis pelo próprio usuário no ícone de engrenagem (⚙️) da interface:
+
+| Modo | Onde a chave fica | Como habilitar |
+|---|---|---|
+| 🖥️ **Núcleo local (padrão)** | Nenhuma chave necessária | Funciona imediatamente — classificador determinístico local, 100% offline |
+| 🌐 **Servidor (`.env`)** | No servidor, via `GEMINI_API_KEY` | Recomendado para self-hosting em sua própria máquina/container |
+| 🔑 **Navegador (BYOK)** | No `localStorage` do navegador do usuário | Cole sua própria chave da API Gemini direto na interface, sem precisar rodar o servidor via terminal |
+
+Ou seja: **nenhuma funcionalidade do núcleo é paga ou bloqueada** — a IA é apenas um complemento opcional que usa a cota/chave do próprio usuário (BYOK — *Bring Your Own Key*) com o Google AI Studio, e não um serviço mantido ou cobrado por este projeto.
 
 ## ✨ Funcionalidades
 
@@ -43,13 +55,15 @@ Todo o processamento de imagem acontece no **Canvas 2D do navegador** — não h
 - **Exportação em ZIP** com todos os mapas em JPG, prontos para uso.
 - **Guias e configuração automática por software**: Blender (com script Python de montagem de nós em 1 clique), V-Ray, Unity (URP/HDRP) e Unreal Engine.
 - **Interface multi-idioma**: Português (BR), English, Español, 简体中文 e 日本語.
+- **Painel de configuração Open Core** (⚙️) — escolha entre classificador local, chave de servidor (`.env`) ou sua própria chave Gemini salva no navegador, com teste de conexão integrado.
 
 ## 🖥️ Como funciona
 
 ```
 Prompt de texto  ──┐
-                    ├──► Classificação IA (Gemini) ──► Propriedades físicas do material
-Imagem enviada   ──┘                                            │
+                    ├──► Classificador local (núcleo aberto)  ──┐
+Imagem enviada   ──┘        ou IA Gemini (opcional/BYOK)        ├──► Propriedades físicas do material
+                                                                  │
                                                                   ▼
                                           Síntese procedural (Canvas 2D)
                                                                   │
@@ -64,7 +78,7 @@ Imagem enviada   ──┘                                            │
                               Exportação ZIP + configuração para Blender / V-Ray / Unity / Unreal
 ```
 
-Se a `GEMINI_API_KEY` não estiver configurada, ou a chamada à IA falhar, um **classificador local determinístico** (baseado em palavras-chave em português) assume a interpretação do prompt, garantindo que a aplicação continue funcional offline.
+Por padrão, o app usa o **classificador local determinístico** (baseado em palavras-chave em português), que é parte do núcleo aberto e funciona 100% offline. Se o usuário configurar uma `GEMINI_API_KEY` — no servidor (`.env`) ou na própria interface (localStorage) — a classificação passa a usar a IA generativa para interpretações mais ricas do prompt/imagem. Se a chamada à IA falhar, o app volta automaticamente ao classificador local.
 
 ## 🚀 Instalação
 
@@ -77,14 +91,14 @@ Se a `GEMINI_API_KEY` não estiver configurada, ou a chamada à IA falhar, um **
    npm install
    ```
 
-2. Configure sua chave da API Gemini. Copie o arquivo de exemplo e edite os valores:
+2. **(Opcional)** Configure sua chave da API Gemini para habilitar a classificação por IA generativa. O app funciona normalmente sem isso, usando o classificador local do núcleo aberto.
    ```bash
    cp .env.example .env.local
    ```
    ```env
    GEMINI_API_KEY="sua-chave-da-api-gemini"
    ```
-   > A chave é usada apenas no servidor para classificar materiais a partir do prompt/imagem. Sem ela, o app funciona normalmente usando o classificador local como fallback.
+   > Alternativamente, você pode colar sua própria chave diretamente na interface (ícone ⚙️ no topo), sem precisar editar arquivos nem rodar o servidor via terminal — ela fica salva apenas no `localStorage` do seu navegador.
 
 3. Rode o app em modo desenvolvimento:
    ```bash
@@ -151,6 +165,7 @@ O app gera automaticamente instruções e parâmetros específicos para:
 │   │   ├── MapInspector2D.tsx      # Inspetor individual dos mapas PBR
 │   │   ├── MapControls.tsx         # Controles de ajuste fino dos parâmetros físicos
 │   │   ├── SoftwareConfigView.tsx  # Configurações/scripts para Blender, V-Ray, Unity, Unreal
+│   │   ├── ApiKeySettingsModal.tsx # Painel Open Core: modo local / servidor / chave própria (BYOK)
 │   │   └── LanguageSelector.tsx    # Seletor de idioma
 │   ├── utils/
 │   │   ├── pbrGenerator.ts         # Derivação dos mapas PBR a partir da base
@@ -158,6 +173,7 @@ O app gera automaticamente instruções e parâmetros específicos para:
 │   │   ├── presets.ts              # Presets de materiais
 │   │   ├── materialTypePresets.ts  # Presets por tipo/categoria
 │   │   ├── softwareGuides.ts       # Geração das configurações por software 3D
+│   │   ├── apiKeyStorage.ts        # Gerenciamento da chave Gemini no localStorage (BYOK)
 │   │   └── zipExporter.ts          # Empacotamento e download em ZIP
 │   └── i18n/                       # Traduções (PT, EN, ES, ZH, JA)
 └── metadata.json
@@ -169,15 +185,9 @@ O app gera automaticamente instruções e parâmetros específicos para:
 
 ## 📄 Licença
 
-Este projeto ainda não possui uma licença definida. Por enquanto, todos os direitos
-são reservados — o código não está liberado para uso, cópia ou distribuição por
-terceiros até que uma licença seja escolhida.
+Este projeto segue um modelo **Open Core**:
 
-Se você tem interesse em usar, contribuir ou fazer fork deste projeto, abra uma
-issue ou entre em contato.
+- **Núcleo (core)** — todo o motor de geração de texturas PBR (síntese procedural, derivação de mapas, presets, preview 3D, inspetor 2D, exportação ZIP e guias de configuração por software) é **código aberto**, licenciado sob a **[GNU General Public License v3.0 (GPLv3)](LICENSE)**. Isso significa que qualquer pessoa pode usar, estudar, modificar e redistribuir o código, **desde que** qualquer trabalho derivado/redistribuído também seja disponibilizado sob a GPLv3 (copyleft) — incluindo o código-fonte correspondente. Consulte o arquivo [`LICENSE`](LICENSE) para o texto integral.
+- **Camada de IA opcional** — a classificação de materiais via API Gemini **não é um recurso pago por este projeto**: ela depende de uma chave da API do Google AI Studio fornecida pelo próprio usuário (BYOK), sujeita aos termos e à política de preços do Google. O código dessa integração (`server.ts`, `ApiKeySettingsModal.tsx`, `apiKeyStorage.ts`) está incluído no mesmo repositório e sob a mesma licença GPLv3 — o "core" não é artificialmente limitado, apenas o uso da IA depende de uma chave externa.
 
-Pretendo definir uma licença (provavelmente MIT) em breve.
-
-> ⚠️ Este projeto foi desenvolvido majoritariamente com assistência de IA
-> (vibe coding). Use por sua conta e risco — partes do código podem não ter
-> sido revisadas em detalhe.
+> ⚠️ **Nota sobre a GPLv3**: por ser uma licença *copyleft forte*, qualquer software que incorpore ou derive deste código (inclusive versões modificadas hospedadas/distribuídas por terceiros) também deve ser distribuído sob a GPLv3, com código-fonte disponível. Se no futuro você pretende oferecer um "core" livre e um módulo comercial/proprietário separado (o modelo open core mais comum em produtos SaaS), avalie se a GPLv3 é a escolha certa para o núcleo — ela impede que terceiros criem forks fechados/proprietários, mas também impõe essa mesma obrigação a qualquer parte comercial que venha a ser construída diretamente sobre esse código. Nesses casos, é comum consultar um profissional jurídico antes de definir a estrutura final de licenciamento.
