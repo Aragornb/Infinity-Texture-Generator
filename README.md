@@ -169,4 +169,17 @@ O app gera automaticamente instruções e parâmetros específicos para:
 
 ## 📄 Licença
 
-Defina aqui a licença do projeto (ex.: MIT). Nenhuma licença foi especificada ainda.
+## 📄 Licença
+
+Este projeto ainda não possui uma licença definida. Por enquanto, todos os direitos
+são reservados — o código não está liberado para uso, cópia ou distribuição por
+terceiros até que uma licença seja escolhida.
+
+Se você tem interesse em usar, contribuir ou fazer fork deste projeto, abra uma
+issue ou entre em contato.
+
+Pretendo definir uma licença (provavelmente MIT) em breve.
+
+> ⚠️ Este projeto foi desenvolvido majoritariamente com assistência de IA
+> (vibe coding). Use por sua conta e risco — partes do código podem não ter
+> sido revisadas em detalhe.
