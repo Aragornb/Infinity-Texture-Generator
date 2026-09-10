@@ -169,8 +169,6 @@ O app gera automaticamente instruções e parâmetros específicos para:
 
 ## 📄 Licença
 
-## 📄 Licença
-
 Este projeto ainda não possui uma licença definida. Por enquanto, todos os direitos
 são reservados — o código não está liberado para uso, cópia ou distribuição por
 terceiros até que uma licença seja escolhida.
